@@ -1,9 +1,10 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs'); // Use bcryptjs for portability
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
-const nodemailer = require('nodemailer'); // Import Nodemailer
+const nodemailer = require('nodemailer');
+const listEndpoints = require('express-list-endpoints'); // Import the listEndpoints module
 require('dotenv').config();
 
 const app = express();
@@ -26,8 +27,8 @@ const User = mongoose.model('User', UserSchema);
 const transporter = nodemailer.createTransport({
   service: 'gmail', // or another email service
   auth: {
-    user: process.env.EMAIL_USER, // Your email
-    pass: process.env.EMAIL_PASS, // Your email password or app password
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
@@ -58,6 +59,7 @@ app.post('/register', async (req, res) => {
       res.status(201).json({ email, password });
     });
   } catch (error) {
+    console.error(error);
     res.status(400).json({ error: 'User registration failed.' });
   }
 });
@@ -76,6 +78,7 @@ app.post('/login', async (req, res) => {
     const token = jwt.sign({ email: user.email }, process.env.JWT_SECRET || 'SammyBboy334', { expiresIn: '1h' });
     res.json({ token });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -84,6 +87,14 @@ app.post('/login', async (req, res) => {
 app.get('/', (req, res) => {
   res.send('Welcome to the Sammy Indicator Backend');
 });
+
+// Add another route for testing
+app.get('/your-route', (req, res) => {
+  res.send('This is your route logic.');
+});
+
+// Log all available endpoints
+console.log(listEndpoints(app));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
