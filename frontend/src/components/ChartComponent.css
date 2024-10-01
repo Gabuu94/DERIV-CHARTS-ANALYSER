@@ -1,0 +1,25 @@
+/* ChartComponent.css */
+#chart {
+    width: 100%;
+    height: 500px;
+    background-color: #ffffff; /* Chart background color */
+  }
+  
+  .select-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  
+  select {
+    padding: 10px;
+    margin-right: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  
+  label {
+    font-weight: bold;
+    margin-right: 10px;
+  }
+  
