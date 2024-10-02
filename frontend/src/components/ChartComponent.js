@@ -1,230 +1,132 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createChart } from 'lightweight-charts';
-import './ChartComponent.css'; // Import the custom CSS file
 
 const ChartComponent = () => {
-  const [chartData, setChartData] = useState([]);
-  const [volatility, setVolatility] = useState('R_100');
-  const [granularity, setGranularity] = useState(60);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [chart, setChart] = useState(null);
+  const chartContainerRef = useRef(null);
   const [candlestickSeries, setCandlestickSeries] = useState(null);
-  const [markers, setMarkers] = useState([]);
+  const [selectedMarket, setSelectedMarket] = useState('R_100'); // Dropdown for volatility index
+  const [selectedTimeframe, setSelectedTimeframe] = useState(60); // Dropdown for timeframes
 
-  // Descriptive volatility labels for the dropdown
-  const volatilities = [
-    { value: 'R_100', label: 'Volatility 100 Index' },
-    { value: 'R_75', label: 'Volatility 75 Index' },
-    { value: 'R_50', label: 'Volatility 50 Index' },
-    { value: 'R_25', label: 'Volatility 25 Index' },
-    { value: 'R_10', label: 'Volatility 10 Index' },
-  ];
+  useEffect(() => {
+    // Initialize the chart
+    const chartInstance = createChart(chartContainerRef.current, {
+      width: chartContainerRef.current.clientWidth,
+      height: 450, // Increased height
+      layout: {
+        backgroundColor: '#FFFFFF',
+        textColor: '#000',
+      },
+      grid: {
+        vertLines: { color: '#e1e1e1' },
+        horzLines: { color: '#e1e1e1' },
+      },
+      priceScale: {
+        borderColor: '#cccccc',
+      },
+      timeScale: {
+        borderColor: '#cccccc',
+      },
+    });
 
-  const timeframes = [
-    { value: 60, label: '1 minute' },
-    { value: 120, label: '2 minutes' },
-    { value: 300, label: '5 minutes' },
-    { value: 600, label: '10 minutes' },
-    { value: 900, label: '15 minutes' },
-  ];
+    // Create candlestick series
+    const candleSeries = chartInstance.addCandlestickSeries({
+      upColor: '#4caf50',
+      downColor: '#ef5350',
+      borderDownColor: '#ef5350',
+      borderUpColor: '#4caf50',
+      wickDownColor: '#ef5350',
+      wickUpColor: '#4caf50',
+    });
 
-  // Function to fetch chart data from the WebSocket
-  const fetchChartData = useCallback(() => {
-    setLoading(true);
-    const socket = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089');
+    setCandlestickSeries(candleSeries);
 
-    socket.onopen = () => {
+    const handleResize = () => {
+      chartInstance.applyOptions({ width: chartContainerRef.current.clientWidth });
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chartInstance.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!candlestickSeries) return;
+
+    // WebSocket connection to fetch data based on market and timeframe
+    const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089');
+
+    ws.onopen = () => {
       console.log('WebSocket connection opened.');
-      socket.send(
-        JSON.stringify({
-          ticks_history: volatility,
-          granularity: granularity,
-          style: 'candles',
-          end: 'latest',
-          count: 100,
-        })
-      );
+      ws.send(JSON.stringify({
+        ticks_history: selectedMarket,
+        adjust_start_time: 1,
+        count: 100,
+        end: 'latest',
+        start: 1,
+        style: 'candles',
+        subscribe: 1,
+        granularity: selectedTimeframe, // Timeframe (seconds)
+      }));
     };
 
-    // Handle WebSocket message for receiving data
-    socket.onmessage = (event) => {
-      setLoading(false);
-      const response = JSON.parse(event.data);
-      console.log('WebSocket message received:', response);
-      if (response.candles) {
-        const candles = response.candles.map((candle) => ({
-          time: Math.floor(candle.epoch),
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.candles) {
+        const formattedData = data.candles.map(candle => ({
+          time: candle.epoch,
           open: candle.open,
           high: candle.high,
           low: candle.low,
           close: candle.close,
         }));
-        setChartData(candles);
-      } else if (response.error) {
-        setError(response.error.message);
+
+        candlestickSeries.setData(formattedData);
+
+        // Example marker logic (reduced frequency)
+        const generatedMarkers = formattedData.map((candle, index) => {
+          if (index % 10 === 0 && candle.close > formattedData[index - 1]?.close) {
+            return { time: candle.time, position: 'belowBar', color: 'green', shape: 'arrowUp', text: 'BUY' };
+          } else if (index % 10 === 0 && candle.close < formattedData[index - 1]?.close) {
+            return { time: candle.time, position: 'aboveBar', color: 'red', shape: 'arrowDown', text: 'SELL' };
+          }
+          return null;
+        }).filter(marker => marker !== null);
+
+        candlestickSeries.setMarkers(generatedMarkers);
       }
     };
-
-    // Handle WebSocket errors
-    socket.onerror = (error) => {
-      setLoading(false);
-      setError('WebSocket error: ' + error.message);
-      console.error('WebSocket error:', error);
-    };
-
-    // Clean up the WebSocket connection when the component is unmounted or updated
-    return () => {
-      console.log('Closing WebSocket connection.');
-      socket.close();
-    };
-  }, [volatility, granularity]);
-
-  // Fetch new chart data when volatility or granularity changes
-  useEffect(() => {
-    fetchChartData();
-  }, [fetchChartData]);
-
-  const handleVolatilityChange = (e) => {
-    setVolatility(e.target.value);
-  };
-
-  const handleGranularityChange = (e) => {
-    setGranularity(parseInt(e.target.value));
-  };
-
-  // Initialize the chart on component mount
-  useEffect(() => {
-    const chartContainer = document.getElementById('chart');
-    if (chartContainer && !chart) {
-      const newChart = createChart(chartContainer, {
-        width: chartContainer.offsetWidth,
-        height: 500,
-        layout: {
-          backgroundColor: '#ffffff',
-          textColor: '#000000',
-        },
-        grid: {
-          vertLines: {
-            color: '#e0e0e0',
-          },
-          horzLines: {
-            color: '#e0e0e0',
-          },
-        },
-        priceScale: {
-          borderColor: '#cccccc',
-        },
-        timeScale: {
-          borderColor: '#cccccc',
-        },
-      });
-
-      setChart(newChart);
-
-      const series = newChart.addCandlestickSeries({
-        upColor: 'green',
-        downColor: 'red',
-        borderVisible: false,
-      });
-
-      setCandlestickSeries(series);
-    }
 
     return () => {
-      if (chart) {
-        chart.remove();
-      }
+      ws.close();
     };
-  }, [chart]);
-
-  // Update the chart with new data
-  useEffect(() => {
-    if (candlestickSeries && chartData.length > 0) {
-      candlestickSeries.setData(chartData);
-
-      // Clear previous markers
-      setMarkers([]);
-
-      const newMarkers = [];
-      chartData.forEach((candle, index) => {
-        const buySignal = index > 0 && candle.close < chartData[index - 1].close;
-        const sellSignal = index > 0 && candle.close > chartData[index - 1].close;
-
-        if (buySignal) {
-          newMarkers.push({
-            time: candle.time,
-            position: 'belowBar',
-            color: 'blue',
-            shape: 'arrowUp',
-            text: 'Buy',
-          });
-        }
-
-        if (sellSignal) {
-          newMarkers.push({
-            time: candle.time,
-            position: 'aboveBar',
-            color: 'red',
-            shape: 'arrowDown',
-            text: 'Sell',
-          });
-        }
-      });
-
-      setMarkers(newMarkers);
-    }
-  }, [candlestickSeries, chartData]);
-
-  // Set chart markers for buy/sell signals
-  useEffect(() => {
-    if (candlestickSeries && markers.length > 0) {
-      candlestickSeries.setMarkers(markers);
-    }
-  }, [candlestickSeries, markers]);
-
-  // Handle chart resizing
-  useEffect(() => {
-    const handleResize = () => {
-      if (chart) {
-        chart.applyOptions({ width: window.innerWidth, height: 500 });
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [chart]);
-
-  if (loading) {
-    return <div>Loading chart data...</div>;
-  }
-
-  if (error) {
-    return <div>Error: {error}</div>;
-  }
+  }, [candlestickSeries, selectedMarket, selectedTimeframe]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <div className="dropdown-container">
-        <label htmlFor="volatility">Volatility: </label>
-        <select id="volatility" value={volatility} onChange={handleVolatilityChange} className="custom-dropdown">
-          {volatilities.map((v) => (
-            <option key={v.value} value={v.value}>
-              {v.label}
-            </option>
-          ))}
+    <div>
+      <h2>Live Candlestick Chart with Buy/Sell Indicators</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+        {/* Dropdown for selecting Volatility Index */}
+        <select value={selectedMarket} onChange={e => setSelectedMarket(e.target.value)}>
+          <option value="R_100">Volatility 100 Index</option>
+          <option value="R_75">Volatility 75 Index</option>
+          <option value="R_50">Volatility 50 Index</option>
+          <option value="R_25">Volatility 25 Index</option>
+          <option value="R_10">Volatility 10 Index</option>
         </select>
 
-        <label htmlFor="timeframe">Timeframe: </label>
-        <select id="timeframe" value={granularity} onChange={handleGranularityChange} className="custom-dropdown">
-          {timeframes.map((tf) => (
-            <option key={tf.value} value={tf.value}>
-              {tf.label}
-            </option>
-          ))}
+        {/* Dropdown for selecting Timeframes */}
+        <select value={selectedTimeframe} onChange={e => setSelectedTimeframe(e.target.value)}>
+          <option value={60}>1 Minute</option>
+          <option value={300}>5 Minutes</option>
+          <option value={1800}>30 Minutes</option>
+          <option value={3600}>1 Hour</option>
         </select>
       </div>
-      <div id="chart" style={{ flex: '1', position: 'relative', width: '100%', height: '500px' }}></div>
+
+      <div ref={chartContainerRef} style={{ width: '100%', height: '450px' }} /> {/* Increased height */}
     </div>
   );
 };
